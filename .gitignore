@@ -1,0 +1,27 @@
+# Site generated files
+site/
+venv/
+tmp/
+**/gen_
+**/gen_*
+.cache
+image_webp_optimizer_script/input/*
+image_webp_optimizer_script/output/*
+# OS generated files
+.DS_Store
+**/.DS_Store
+._.DS_Store
+**/._.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Pipfile
+Pipfile.lock
+
+# Configs and Modules
+# .vscode
+node_modules/
+.vscode/settings.json
+.venv
