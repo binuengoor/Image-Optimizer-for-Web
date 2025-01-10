@@ -44,7 +44,7 @@ Image-Optimizer-for-Web/
 1. Place your images in the `input` folder
 2. Run the script:
 ```
-python webp_optimizer.py
+python script.py
 ```
 3. Select your desired compression mode (1-3)
 4. Find your converted images in the `output` folder
@@ -63,6 +63,8 @@ python webp_optimizer.py
 - JPG/JPEG
 - TIFF
 - BMP
+- GIF
+- WEBP
 
 ## License
 
