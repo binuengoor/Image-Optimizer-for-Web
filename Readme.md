@@ -4,7 +4,7 @@ A Python tool that converts images to WebP format with optimized compression set
 
 ## Features
 
-- Converts common image formats (PNG, JPG, JPEG, TIFF, BMP) to WebP
+- Converts common image formats (PNG, JPG, JPEG, TIFF, BMP, GIF, WEBP) to Optimized WebP
 - Three optimization levels:
   1. Balanced Mode (80% quality) - Recommended for most uses
   2. High Quality (90% quality) - For quality-critical images
@@ -22,12 +22,14 @@ A Python tool that converts images to WebP format with optimized compression set
 
 1. Clone or download this repository
 2. Install dependencies:
-```pip install -r requirements.txt```
+```
+pip install -r requirements.txt
+```
 
 
 ## Directory Structure
 ```
-webp_optimizer/
+Image-Optimizer-for-Web/
 ├── input/
 ├── output/
 ├── script.py
