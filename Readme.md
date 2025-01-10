@@ -22,23 +22,26 @@ A Python tool that converts images to WebP format with optimized compression set
 
 1. Clone or download this repository
 2. Install dependencies:
-`pip install -r requirements.txt`
+```pip install -r requirements.txt```
 
 
 ## Directory Structure
+```
 webp_optimizer/
-├── webp_optimizer.py
-├── requirements.txt
-├── README.md
 ├── input/
 └── output/
-text
+├── script.py
+├── requirements.txt
+├── Readme.md
+├── LICENSE
+```
+
 
 ## Usage
 
 1. Place your images in the `input` folder
 2. Run the script:
-`python webp_optimizer.py`
+```python webp_optimizer.py```
 text
 3. Select your desired compression mode (1-3)
 4. Find your converted images in the `output` folder
