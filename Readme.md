@@ -29,11 +29,11 @@ A Python tool that converts images to WebP format with optimized compression set
 ```
 webp_optimizer/
 ├── input/
-└── output/
+├── output/
 ├── script.py
 ├── requirements.txt
 ├── Readme.md
-├── LICENSE
+└── LICENSE
 ```
 
 
