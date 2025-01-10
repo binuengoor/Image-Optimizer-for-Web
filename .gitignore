@@ -5,8 +5,8 @@ tmp/
 **/gen_
 **/gen_*
 .cache
-image_webp_optimizer_script/input/*
-image_webp_optimizer_script/output/*
+input/
+output/
 # OS generated files
 .DS_Store
 **/.DS_Store
