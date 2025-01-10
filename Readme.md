@@ -43,8 +43,9 @@ Image-Optimizer-for-Web/
 
 1. Place your images in the `input` folder
 2. Run the script:
-```python webp_optimizer.py```
-text
+```
+python webp_optimizer.py
+```
 3. Select your desired compression mode (1-3)
 4. Find your converted images in the `output` folder
 
