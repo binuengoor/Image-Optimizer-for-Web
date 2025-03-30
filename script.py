@@ -13,6 +13,9 @@ import shutil
 from flask import Flask, request, render_template, send_from_directory, jsonify
 from werkzeug.utils import secure_filename
 
+# Define global variables before use
+clear_input_folder_on_startup = True  # Set to False if you don't want to clear input on startup
+
 app = Flask(__name__)
 
 # Use absolute paths to ensure files are saved in the correct location
@@ -90,6 +93,12 @@ def clear_output_folder(output_dir):
 
 @app.route('/')
 def index():
+    # Clear input folder on startup if configured
+    global clear_input_folder_on_startup
+    if clear_input_folder_on_startup:
+        clear_input_folder(app.config['UPLOAD_FOLDER'])
+        clear_input_folder_on_startup = False
+    
     # List any files in the input directory to show what's ready for conversion
     input_files = []
     for file in os.listdir(app.config['UPLOAD_FOLDER']):
@@ -104,19 +113,58 @@ def index():
     
     return render_template('index.html', input_files=input_files, output_files=output_files)
 
+@app.route('/list_output')
+def list_output():
+    """Return a list of files in the output directory with their sizes."""
+    output_files = []
+    try:
+        for file in os.listdir(app.config['OUTPUT_FOLDER']):
+            file_path = os.path.join(app.config['OUTPUT_FOLDER'], file)
+            if os.path.isfile(file_path):
+                file_size = os.path.getsize(file_path)
+                output_files.append({"name": file, "size": file_size})
+        return jsonify({"success": True, "files": output_files})
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e), "files": []})
+
+@app.route('/list_input')
+def list_input():
+    """Return a list of files in the input directory with their sizes."""
+    input_files = []
+    try:
+        for file in os.listdir(app.config['UPLOAD_FOLDER']):
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], file)
+            if os.path.isfile(file_path):
+                file_size = os.path.getsize(file_path)
+                input_files.append({"name": file, "size": file_size})
+        return jsonify({"success": True, "files": input_files})
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e), "files": []})
+
+@app.route('/clear_output', methods=['POST'])
+def clear_output():
+    """Clear all files from the output directory."""
+    try:
+        clear_output_folder(app.config['OUTPUT_FOLDER'])
+        return jsonify({"success": True, "message": "Output folder cleared successfully"})
+    except Exception as e:
+        return jsonify({"success": False, "message": f"Error clearing output folder: {str(e)}"})
+
+@app.route('/clear_input', methods=['POST'])
+def clear_input():
+    """Clear all files from the input directory."""
+    try:
+        clear_input_folder(app.config['UPLOAD_FOLDER'])
+        return jsonify({"success": True, "message": "Input folder cleared successfully"})
+    except Exception as e:
+        return jsonify({"success": False, "message": f"Error clearing input folder: {str(e)}"})
+
 @app.route('/upload', methods=['POST'])
 def upload_files():
-    # Clear input folder before each conversion
-    input_dir = app.config['UPLOAD_FOLDER']
-    for file in os.listdir(input_dir):
-        file_path = os.path.join(input_dir, file)
-        if os.path.isfile(file_path):
-            os.remove(file_path)
-
     # Save uploaded files
     if 'files[]' not in request.files:
         print("❌ No files part in the request")  # Debugging log
-        return "No files part in the request", 400
+        return jsonify({"success": False, "message": "No files part in the request"})
 
     files = request.files.getlist('files[]')
     print(f"📂 Received files: {[file.filename for file in files]}")  # Debugging log
@@ -131,7 +179,19 @@ def upload_files():
             file_count += 1
 
     if file_count > 0:
-        return jsonify({"success": True, "message": f"{file_count} files uploaded successfully!"})
+        # Get list of all files in the input folder with their sizes
+        input_files = []
+        for file in os.listdir(app.config['UPLOAD_FOLDER']):
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], file)
+            if os.path.isfile(file_path):
+                file_size = os.path.getsize(file_path)
+                input_files.append({"name": file, "size": file_size})
+                
+        return jsonify({
+            "success": True, 
+            "message": f"{file_count} files uploaded successfully!",
+            "input_files": input_files
+        })
     else:
         return jsonify({"success": False, "message": "No valid files uploaded"})
 
@@ -149,10 +209,18 @@ def convert():
     conversion_count = main_gui(compression_mode, max_dim)
 
     if conversion_count > 0:
+        # Get output files with their sizes
+        output_files = []
+        for file in os.listdir(app.config['OUTPUT_FOLDER']):
+            file_path = os.path.join(app.config['OUTPUT_FOLDER'], file)
+            if os.path.isfile(file_path):
+                file_size = os.path.getsize(file_path)
+                output_files.append({"name": file, "size": file_size})
+                
         return jsonify({
             "success": True, 
             "message": f"Conversion complete! {conversion_count} images converted.",
-            "output_files": os.listdir(app.config['OUTPUT_FOLDER'])
+            "output_files": output_files
         })
     else:
         return jsonify({
@@ -162,7 +230,10 @@ def convert():
 
 @app.route('/output/<filename>')
 def download_file(filename):
-    return send_from_directory(app.config['OUTPUT_FOLDER'], filename)
+    # Use send_from_directory with as_attachment=True to force download
+    # But only when the download parameter is present
+    as_attachment = 'download' in request.args
+    return send_from_directory(app.config['OUTPUT_FOLDER'], filename, as_attachment=as_attachment)
 
 def main_gui(compression_mode, max_dim):
     input_dir = app.config['UPLOAD_FOLDER']
