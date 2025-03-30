@@ -53,9 +53,9 @@ docker-compose up -d
 
 #### Using Docker directly
 
-1. Pull the image from Docker Hub:
+1. Pull the image from GitHub Container Registry:
 ```
-docker pull binuengoor/image-optimizer-for-web:latest
+docker pull ghcr.io/binuengoor/image-optimizer-for-web:latest
 ```
 
 2. Run the container:
@@ -64,7 +64,7 @@ docker run -d -p 3756:3756 \
   -v $(pwd)/input:/app/input \
   -v $(pwd)/output:/app/output \
   --name webp-optimizer \
-  binuengoor/image-optimizer-for-web:latest
+  ghcr.io/binuengoor/image-optimizer-for-web:latest
 ```
 
 3. Access the web interface at http://localhost:3756
@@ -115,7 +115,6 @@ docker run -d -p 3756:3756 \
 
 For Docker deployment, you can customize the application using environment variables:
 
-- `PORT`: The port to run the application (default: 3756)
 - `DEBUG`: Enable debug mode, set to True/False (default: False)
 - `MAX_UPLOAD_SIZE`: Maximum upload file size in bytes (default: 16MB)
 
@@ -124,10 +123,9 @@ Example:
 docker run -d -p 8080:8080 \
   -v $(pwd)/input:/app/input \
   -v $(pwd)/output:/app/output \
-  -e PORT=8080 \
   -e DEBUG=True \
   --name webp-optimizer \
-  binuengoor/image-optimizer-for-web:latest
+  ghcr.io/binuengoor/image-optimizer-for-web:latest
 ```
 
 ## License

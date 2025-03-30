@@ -16,7 +16,6 @@ COPY . .
 RUN mkdir -p /app/input /app/output
 
 # Set environment variables
-ENV PORT=3756
 ENV DEBUG=False
 
 # Expose the application port
