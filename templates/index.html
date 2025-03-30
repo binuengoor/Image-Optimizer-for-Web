@@ -131,78 +131,145 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     
     <script>
+        /**
+         * WebP Optimizer Frontend Script
+         * Handles UI interactions, AJAX requests, and file management
+         */
         document.addEventListener('DOMContentLoaded', function() {
+            // App configuration
+            const config = {
+                endpoints: {
+                    listInput: '/list_input',
+                    listOutput: '/list_output',
+                    clearInput: '/clear_input',
+                    clearOutput: '/clear_output',
+                    upload: '/upload',
+                    convert: '/convert',
+                    output: '/output'
+                },
+                alertDismissTime: 5000 // Time in ms before alerts auto-dismiss
+            };
+            
             // Initialize UI elements
-            const dropZone = document.getElementById('dropZone');
-            const fileInput = document.getElementById('files');
-            const browseButton = document.getElementById('browseButton');
-            const convertButton = document.getElementById('convertButton');
-            const fileList = document.getElementById('fileList');
-            const inputFiles = document.getElementById('inputFiles');
-            const noInputFiles = document.getElementById('noInputFiles');
-            const uploadingSpinner = document.getElementById('uploadingSpinner');
-            const alertArea = document.getElementById('alertArea');
-            const resultFiles = document.getElementById('resultFiles');
-            const noResults = document.getElementById('noResults');
-            const clearOutputBtn = document.getElementById('clearOutputBtn');
-            const clearInputBtn = document.getElementById('clearInputBtn');
+            const elements = {
+                // File upload elements
+                dropZone: document.getElementById('dropZone'),
+                fileInput: document.getElementById('files'),
+                browseButton: document.getElementById('browseButton'),
+                convertButton: document.getElementById('convertButton'),
+                uploadingSpinner: document.getElementById('uploadingSpinner'),
+                
+                // File listing elements
+                fileList: document.getElementById('fileList'),
+                noInputFiles: document.getElementById('noInputFiles'),
+                resultFiles: document.getElementById('resultFiles'),
+                noResults: document.getElementById('noResults'),
+                
+                // Action buttons
+                clearInputBtn: document.getElementById('clearInputBtn'),
+                clearOutputBtn: document.getElementById('clearOutputBtn'),
+                
+                // Notification area
+                alertArea: document.getElementById('alertArea'),
+                
+                // Form inputs
+                compressionMode: document.getElementById('compression_mode'),
+                maxDimension: document.getElementById('max_dim')
+            };
             
-            // Load existing files
-            loadOutputFiles();
-            loadInputFiles();
+            // Initialize the application
+            initializeApp();
             
-            // Setup clear buttons
-            clearInputBtn.addEventListener('click', function() {
-                if (confirm('Are you sure you want to clear all files from the input folder?')) {
-                    fetch('/clear_input', {
-                        method: 'POST'
-                    })
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.success) {
-                            showAlert('Input folder cleared successfully', 'success');
-                            loadInputFiles();
-                        } else {
-                            showAlert(data.message || 'Failed to clear input folder', 'danger');
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Error:', error);
-                        showAlert('Failed to clear input folder', 'danger');
+            /**
+             * Initialize the application
+             */
+            function initializeApp() {
+                // Load existing files
+                loadInputFiles();
+                loadOutputFiles();
+                
+                // Setup event listeners
+                setupDragAndDrop();
+                setupButtonHandlers();
+            }
+            
+            /**
+             * Setup drag and drop functionality
+             */
+            function setupDragAndDrop() {
+                // Prevent default browser behavior
+                ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                    elements.dropZone.addEventListener(eventName, preventDefaults);
+                });
+                
+                // Highlight drop zone on drag enter/over
+                ['dragenter', 'dragover'].forEach(eventName => {
+                    elements.dropZone.addEventListener(eventName, () => {
+                        elements.dropZone.classList.add('dragover');
                     });
-                }
-            });
-            
-            clearOutputBtn.addEventListener('click', function() {
-                if (confirm('Are you sure you want to clear all files from the output folder?')) {
-                    fetch('/clear_output', {
-                        method: 'POST'
-                    })
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.success) {
-                            showAlert('Output folder cleared successfully', 'success');
-                            displayConvertedFiles([]);
-                        } else {
-                            showAlert(data.message || 'Failed to clear output folder', 'danger');
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Error:', error);
-                        showAlert('Failed to clear output folder', 'danger');
+                });
+                
+                // Remove highlight on drag leave/drop
+                ['dragleave', 'drop'].forEach(eventName => {
+                    elements.dropZone.addEventListener(eventName, () => {
+                        elements.dropZone.classList.remove('dragover');
                     });
-                }
-            });
+                });
+                
+                // Handle dropped files
+                elements.dropZone.addEventListener('drop', (e) => {
+                    const dt = e.dataTransfer;
+                    elements.fileInput.files = dt.files;
+                    uploadFiles();
+                });
+            }
             
+            /**
+             * Setup button handlers
+             */
+            function setupButtonHandlers() {
+                // Browse button
+                elements.browseButton.addEventListener('click', () => {
+                    elements.fileInput.click();
+                });
+                
+                // File input change
+                elements.fileInput.addEventListener('change', uploadFiles);
+                
+                // Convert button
+                elements.convertButton.addEventListener('click', convertFiles);
+                
+                // Clear buttons
+                elements.clearInputBtn.addEventListener('click', () => {
+                    if (confirm('Are you sure you want to clear all files from the input folder?')) {
+                        clearDirectory(config.endpoints.clearInput, 'Input folder cleared successfully', loadInputFiles);
+                    }
+                });
+                
+                elements.clearOutputBtn.addEventListener('click', () => {
+                    if (confirm('Are you sure you want to clear all files from the output folder?')) {
+                        clearDirectory(config.endpoints.clearOutput, 'Output folder cleared successfully', loadOutputFiles);
+                    }
+                });
+            }
+            
+            /**
+             * Prevent default browser behavior for drag events
+             */
+            function preventDefaults(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            
+            /**
+             * Load input files from the server
+             */
             function loadInputFiles() {
-                fetch('/list_input')
-                    .then(response => response.json())
+                apiRequest(config.endpoints.listInput, 'GET')
                     .then(data => {
-                        displayInputFiles(data.files);
-                        if (data.files.length > 0) {
-                            convertButton.disabled = false;
-                        } else {
-                            convertButton.disabled = true;
+                        if (data.success) {
+                            displayInputFiles(data.files);
+                            elements.convertButton.disabled = !(data.files && data.files.length > 0);
                         }
                     })
                     .catch(error => {
@@ -210,11 +277,112 @@
                     });
             }
             
+            /**
+             * Load output files from the server
+             */
+            function loadOutputFiles() {
+                apiRequest(config.endpoints.listOutput, 'GET')
+                    .then(data => {
+                        if (data.success) {
+                            displayConvertedFiles(data.files);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error loading output files:', error);
+                    });
+            }
+            
+            /**
+             * Upload files to the server
+             */
+            function uploadFiles() {
+                if (elements.fileInput.files.length === 0) {
+                    return;
+                }
+                
+                const formData = new FormData();
+                Array.from(elements.fileInput.files).forEach(file => {
+                    formData.append('files[]', file);
+                });
+                
+                elements.uploadingSpinner.classList.remove('d-none');
+                
+                apiRequest(config.endpoints.upload, 'POST', formData)
+                    .then(data => {
+                        if (data.success) {
+                            showAlert(data.message, 'success');
+                            displayInputFiles(data.input_files);
+                            elements.convertButton.disabled = false;
+                        } else {
+                            showAlert(data.message || 'Upload failed', 'danger');
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        showAlert('Upload failed: Network error', 'danger');
+                    })
+                    .finally(() => {
+                        elements.uploadingSpinner.classList.add('d-none');
+                    });
+            }
+            
+            /**
+             * Convert files on the server
+             */
+            function convertFiles() {
+                const formData = new FormData();
+                formData.append('compression_mode', elements.compressionMode.value);
+                formData.append('max_dim', elements.maxDimension.value);
+                
+                elements.convertButton.disabled = true;
+                elements.convertButton.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Converting...';
+                
+                apiRequest(config.endpoints.convert, 'POST', formData)
+                    .then(data => {
+                        if (data.success) {
+                            showAlert(data.message, 'success');
+                            displayConvertedFiles(data.output_files);
+                        } else {
+                            showAlert(data.message || 'Conversion failed', 'danger');
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        showAlert('Conversion failed: Network error', 'danger');
+                    })
+                    .finally(() => {
+                        elements.convertButton.disabled = false;
+                        elements.convertButton.innerHTML = '<i class="fas fa-sync-alt me-2"></i>Convert';
+                    });
+            }
+            
+            /**
+             * Clear directory on the server
+             */
+            function clearDirectory(endpoint, successMessage, callback) {
+                apiRequest(endpoint, 'POST')
+                    .then(data => {
+                        if (data.success) {
+                            showAlert(data.message || successMessage, 'success');
+                            if (callback) callback();
+                        } else {
+                            showAlert(data.message || 'Failed to clear directory', 'danger');
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        showAlert('Failed to clear directory', 'danger');
+                    });
+            }
+            
+            /**
+             * Display input files list
+             */
             function displayInputFiles(files) {
-                fileList.innerHTML = '';
+                elements.fileList.innerHTML = '';
                 
                 if (files && files.length > 0) {
-                    noInputFiles.classList.add('d-none');
+                    elements.noInputFiles.classList.add('d-none');
                     
                     files.forEach(file => {
                         const item = document.createElement('div');
@@ -226,152 +394,27 @@
                                 <small class="text-muted">${formatFileSize(file.size)}</small>
                             </div>
                         `;
-                        fileList.appendChild(item);
+                        elements.fileList.appendChild(item);
                     });
                 } else {
-                    noInputFiles.classList.remove('d-none');
+                    elements.noInputFiles.classList.remove('d-none');
                 }
             }
             
-            function loadOutputFiles() {
-                fetch('/list_output')
-                    .then(response => response.json())
-                    .then(data => {
-                        displayConvertedFiles(data.files);
-                    })
-                    .catch(error => {
-                        console.error('Error loading output files:', error);
-                    });
-            }
-
-            // Setup drag and drop functionality
-            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-                dropZone.addEventListener(eventName, preventDefaults, false);
-            });
-            
-            function preventDefaults(e) {
-                e.preventDefault();
-                e.stopPropagation();
-            }
-            
-            ['dragenter', 'dragover'].forEach(eventName => {
-                dropZone.addEventListener(eventName, highlight, false);
-            });
-            
-            ['dragleave', 'drop'].forEach(eventName => {
-                dropZone.addEventListener(eventName, unhighlight, false);
-            });
-            
-            function highlight() {
-                dropZone.classList.add('dragover');
-            }
-            
-            function unhighlight() {
-                dropZone.classList.remove('dragover');
-            }
-            
-            dropZone.addEventListener('drop', handleDrop, false);
-            
-            function handleDrop(e) {
-                const dt = e.dataTransfer;
-                const files = dt.files;
-                fileInput.files = files;
-                uploadFiles();
-            }
-            
-            // Browse button functionality
-            browseButton.addEventListener('click', function() {
-                fileInput.click();
-            });
-            
-            fileInput.addEventListener('change', uploadFiles);
-            
-            function uploadFiles() {
-                if (fileInput.files.length === 0) {
-                    return;
-                }
-                
-                const formData = new FormData();
-                Array.from(fileInput.files).forEach(file => {
-                    formData.append('files[]', file);
-                });
-                
-                uploadingSpinner.classList.remove('d-none');
-                
-                fetch('/upload', {
-                    method: 'POST',
-                    body: formData
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        showAlert(data.message, 'success');
-                        displayInputFiles(data.input_files);
-                        convertButton.disabled = false;
-                    } else {
-                        showAlert(data.message || 'Upload failed', 'danger');
-                    }
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    showAlert('Upload failed: Network error', 'danger');
-                })
-                .finally(() => {
-                    uploadingSpinner.classList.add('d-none');
-                });
-            }
-            
-            function formatFileSize(bytes) {
-                if (bytes === 0) return '0 Bytes';
-                const k = 1024;
-                const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-                const i = Math.floor(Math.log(bytes) / Math.log(k));
-                return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-            }
-            
-            // Convert functionality
-            convertButton.addEventListener('click', function() {
-                const formData = new FormData();
-                formData.append('compression_mode', document.getElementById('compression_mode').value);
-                formData.append('max_dim', document.getElementById('max_dim').value);
-                
-                convertButton.disabled = true;
-                convertButton.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Converting...';
-                
-                fetch('/convert', {
-                    method: 'POST',
-                    body: formData
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        showAlert(data.message, 'success');
-                        displayConvertedFiles(data.output_files);
-                    } else {
-                        showAlert(data.message || 'Conversion failed', 'danger');
-                    }
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    showAlert('Conversion failed: Network error', 'danger');
-                })
-                .finally(() => {
-                    convertButton.disabled = false;
-                    convertButton.innerHTML = '<i class="fas fa-sync-alt me-2"></i>Convert';
-                });
-            });
-            
+            /**
+             * Display converted files list
+             */
             function displayConvertedFiles(files) {
                 if (files && files.length > 0) {
-                    noResults.classList.add('d-none');
-                    resultFiles.classList.remove('d-none');
-                    resultFiles.innerHTML = '';
+                    elements.noResults.classList.add('d-none');
+                    elements.resultFiles.classList.remove('d-none');
+                    elements.resultFiles.innerHTML = '';
                     
                     files.forEach(file => {
                         const item = document.createElement('div');
                         item.className = 'list-group-item list-group-item-action d-flex justify-content-between align-items-center';
                         item.innerHTML = `
-                            <a href="/output/${file.name}" target="_blank" class="text-decoration-none flex-grow-1">
+                            <a href="${config.endpoints.output}/${file.name}" target="_blank" class="text-decoration-none flex-grow-1">
                                 <div class="d-flex align-items-center">
                                     <i class="fas fa-file-image me-2 text-success"></i>
                                     <div>
@@ -380,18 +423,52 @@
                                     </div>
                                 </div>
                             </a>
-                            <a href="/output/${file.name}?download" class="btn btn-sm btn-outline-primary download-btn" download>
+                            <a href="${config.endpoints.output}/${file.name}?download" class="btn btn-sm btn-outline-primary download-btn" download>
                                 <i class="fas fa-download"></i>
                             </a>
                         `;
-                        resultFiles.appendChild(item);
+                        elements.resultFiles.appendChild(item);
                     });
                 } else {
-                    noResults.classList.remove('d-none');
-                    resultFiles.innerHTML = '';
+                    elements.noResults.classList.remove('d-none');
+                    elements.resultFiles.innerHTML = '';
                 }
             }
             
+            /**
+             * Generic API request method
+             */
+            async function apiRequest(url, method, body = null) {
+                const options = {
+                    method: method,
+                    headers: {}
+                };
+                
+                if (body && !(body instanceof FormData)) {
+                    options.headers['Content-Type'] = 'application/json';
+                    options.body = JSON.stringify(body);
+                } else if (body) {
+                    options.body = body;
+                }
+                
+                const response = await fetch(url, options);
+                return await response.json();
+            }
+            
+            /**
+             * Format file size in human-readable format
+             */
+            function formatFileSize(bytes) {
+                if (bytes === 0) return '0 Bytes';
+                const k = 1024;
+                const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+            }
+            
+            /**
+             * Show alert message
+             */
             function showAlert(message, type) {
                 const alert = document.createElement('div');
                 alert.className = `alert alert-${type} alert-dismissible fade show`;
@@ -399,13 +476,13 @@
                     ${message}
                     <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
                 `;
-                alertArea.appendChild(alert);
+                elements.alertArea.appendChild(alert);
                 
-                // Auto-dismiss after 5 seconds
+                // Auto-dismiss after set time
                 setTimeout(() => {
                     const bsAlert = new bootstrap.Alert(alert);
                     bsAlert.close();
-                }, 5000);
+                }, config.alertDismissTime);
             }
         });
     </script>
