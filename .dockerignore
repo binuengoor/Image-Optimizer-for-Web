@@ -1,4 +1,4 @@
-# Python specific
+# Exclude unnecessary files from Docker build context
 __pycache__/
 *.py[cod]
 *$py.class
@@ -19,28 +19,23 @@ var/
 *.egg-info/
 .installed.cfg
 *.egg
-.pytest_cache/
-.coverage
-htmlcov/
 
-# Virtual environments
-venv/
-.venv/
-ENV/
-env/
-
-# Site generated files
-site/
-tmp/
-**/gen_
-**/gen_*
-.cache
-
-# Application data directories
+# Docker shouldn't copy these application data directories
 input/*
 output/*
 !input/.gitkeep
 !output/.gitkeep
+
+# Version control
+.git
+.gitignore
+.github
+
+# Editor directories and files
+.idea
+.vscode
+*.swp
+*.swo
 
 # OS generated files
 .DS_Store
@@ -53,10 +48,13 @@ output/*
 ehthumbs.db
 Thumbs.db
 
-# Development files
-Pipfile
-Pipfile.lock
+# Documentation
+README.md
+LICENSE
+*.md
 
-# Editor configurations
-.idea/
-.vscode/settings.json
+# Cache files
+.cache
+.pytest_cache/
+.coverage
+htmlcov/

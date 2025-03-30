@@ -1,0 +1,17 @@
+version: '3'
+
+services:
+  webp-optimizer:
+    image: binuengoor/image-optimizer-for-web:latest
+    # Alternatively, build from local Dockerfile
+    # build: .
+    container_name: webp-optimizer
+    ports:
+      - "3756:3756"
+    volumes:
+      - ./input:/app/input
+      - ./output:/app/output
+    environment:
+      - PORT=3756
+      - DEBUG=False
+    restart: unless-stopped
