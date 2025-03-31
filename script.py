@@ -43,6 +43,163 @@ class WebPConfig:
     DEBUG = os.environ.get('DEBUG', 'True').lower() in ('true', '1', 't')
 
 
+# File handling class to centralize file operations
+class FileHandler:
+    """Centralized file operations for WebP Optimizer"""
+    
+    @staticmethod
+    def create_thumbnail_b64(file_path):
+        """Create a base64 encoded thumbnail for an image"""
+        try:
+            with Image.open(file_path) as img:
+                # Create a thumbnail, preserving aspect ratio
+                img.thumbnail((WebPConfig.THUMBNAIL_SIZE, WebPConfig.THUMBNAIL_SIZE))
+                
+                # Convert to RGB if necessary (for transparent images)
+                if img.mode in ('RGBA', 'LA'):
+                    background = Image.new('RGB', img.size, (255, 255, 255))
+                    background.paste(img, mask=img.split()[3])  # 3 is the alpha channel
+                    img = background
+                
+                # Save thumbnail to memory buffer
+                buffer = io.BytesIO()
+                img.save(buffer, format='JPEG', quality=70)
+                buffer.seek(0)
+                
+                # Convert to base64
+                img_b64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+                return f"data:image/jpeg;base64,{img_b64}"
+        except Exception as e:
+            logger.error(f"Error creating thumbnail for {file_path}: {str(e)}")
+            return None
+
+    @staticmethod
+    def get_files_with_sizes(directory):
+        """Get all files in a directory with their sizes and thumbnails."""
+        files = []
+        try:
+            for file in os.listdir(directory):
+                # Skip .gitkeep files
+                if file == '.gitkeep':
+                    continue
+                    
+                file_path = os.path.join(directory, file)
+                if os.path.isfile(file_path):
+                    file_size = os.path.getsize(file_path)
+                    file_data = {"name": file, "size": file_size}
+                    
+                    # Generate thumbnail for supported image formats
+                    if file.lower().endswith(WebPConfig.SUPPORTED_FORMATS):
+                        thumbnail = FileHandler.create_thumbnail_b64(file_path)
+                        if thumbnail:
+                            file_data["thumbnail"] = thumbnail
+                            
+                    files.append(file_data)
+            return files
+        except Exception as e:
+            logger.error(f"Error listing files in {directory}: {str(e)}")
+            return []
+
+    @staticmethod
+    def clear_directory(directory, dir_type="directory"):
+        """Clear all files from a directory."""
+        try:
+            count = 0
+            for file in os.listdir(directory):
+                file_path = os.path.join(directory, file)
+                if os.path.isfile(file_path) and file != '.gitkeep':
+                    os.remove(file_path)
+                    count += 1
+            if count > 0:
+                logger.info(f"✅ {dir_type.capitalize()} cleared successfully. ({count} files removed)")
+            return count
+        except Exception as e:
+            logger.error(f"❌ Error clearing {dir_type}: {str(e)}")
+            return 0
+            
+    @staticmethod
+    def validate_file_operation(filename, directory, check_exists=True):
+        """Validate a file operation with common checks."""
+        if not filename or filename.strip() == '':
+            return False, "Invalid filename"
+            
+        file_path = os.path.join(directory, filename)
+        
+        if check_exists and not os.path.exists(file_path):
+            return False, f"File {filename} not found"
+            
+        return True, file_path
+
+
+class ImageProcessor:
+    """Image processing operations for WebP conversion"""
+    
+    @staticmethod
+    def resize_image(image, max_dim):
+        """Resize image while maintaining aspect ratio if it exceeds max_dim."""
+        width, height = image.size
+
+        if max(width, height) > max_dim:
+            scale = max_dim / max(width, height)
+            new_size = (int(width * scale), int(height * scale))
+            return image.resize(new_size, Image.LANCZOS)
+        
+        return image  # Return original image if no resizing is needed
+
+    @staticmethod
+    def convert_to_webp(input_path, output_path, compression_mode, max_dim):
+        """Convert image to WebP with resizing & compression settings."""
+        try:
+            logger.info(f"Converting {input_path} to {output_path}")
+            image = Image.open(input_path)
+            image = ImageProcessor.resize_image(image, max_dim)  # Resize if needed
+
+            # Get compression settings
+            config = WebPConfig.COMPRESSION_MODES.get(compression_mode, WebPConfig.COMPRESSION_MODES[WebPConfig.DEFAULT_MODE])
+            quality = config["quality"]
+            method = config["method"]
+            lossless = config["lossless"]
+            
+            # Handle based on image mode
+            save_params = {"quality": quality, "method": method}
+            
+            if image.mode in ('RGBA', 'LA'):
+                # Handle images with transparency
+                save_params["lossless"] = lossless
+            else:
+                # Convert to RGB for non-transparent images
+                image = image.convert('RGB')
+                
+            image.save(output_path, 'WEBP', **save_params)
+            return True
+        except Exception as e:
+            logger.error(f"Error converting {input_path}: {str(e)}")
+            return False
+
+    @staticmethod
+    def process_images(input_dir, output_dir, compression_mode, max_dim):
+        """Process all images in input directory and convert to WebP."""
+        conversion_count = 0
+
+        logger.info(f"Looking for files in: {input_dir}")
+        files_in_input = os.listdir(input_dir)
+        logger.info(f"Files found: {len(files_in_input)}")
+
+        for filename in files_in_input:
+            if filename == '.gitkeep':
+                continue
+                
+            if filename.lower().endswith(WebPConfig.SUPPORTED_FORMATS):
+                input_path = os.path.join(input_dir, filename)
+                output_path = os.path.join(output_dir, f"{os.path.splitext(filename)[0]}.webp")
+                logger.info(f"Processing {filename}...")
+                if ImageProcessor.convert_to_webp(input_path, output_path, compression_mode, max_dim):
+                    conversion_count += 1
+                    logger.info(f"✅ Converted: {filename}")
+
+        return conversion_count
+
+
 app = Flask(__name__)
 
 # Use absolute paths to ensure files are saved in the correct location
@@ -56,146 +213,13 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs(app.config['OUTPUT_FOLDER'], exist_ok=True)
 
 
-# Utility functions
-def create_thumbnail_b64(file_path):
-    """Create a base64 encoded thumbnail for an image"""
-    try:
-        with Image.open(file_path) as img:
-            # Create a thumbnail, preserving aspect ratio
-            img.thumbnail((WebPConfig.THUMBNAIL_SIZE, WebPConfig.THUMBNAIL_SIZE))
-            
-            # Convert to RGB if necessary (for transparent images)
-            if img.mode in ('RGBA', 'LA'):
-                background = Image.new('RGB', img.size, (255, 255, 255))
-                background.paste(img, mask=img.split()[3])  # 3 is the alpha channel
-                img = background
-            
-            # Save thumbnail to memory buffer
-            buffer = io.BytesIO()
-            img.save(buffer, format='JPEG', quality=70)
-            buffer.seek(0)
-            
-            # Convert to base64
-            img_b64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
-            return f"data:image/jpeg;base64,{img_b64}"
-    except Exception as e:
-        logger.error(f"Error creating thumbnail for {file_path}: {str(e)}")
-        return None
-
-
-def get_files_with_sizes(directory):
-    """Get all files in a directory with their sizes and thumbnails."""
-    files = []
-    try:
-        for file in os.listdir(directory):
-            # Skip .gitkeep files
-            if file == '.gitkeep':
-                continue
-                
-            file_path = os.path.join(directory, file)
-            if os.path.isfile(file_path):
-                file_size = os.path.getsize(file_path)
-                file_data = {"name": file, "size": file_size}
-                
-                # Generate thumbnail for supported image formats
-                if file.lower().endswith(WebPConfig.SUPPORTED_FORMATS):
-                    thumbnail = create_thumbnail_b64(file_path)
-                    if thumbnail:
-                        file_data["thumbnail"] = thumbnail
-                        
-                files.append(file_data)
-        return files
-    except Exception as e:
-        logger.error(f"Error listing files in {directory}: {str(e)}")
-        return []
-
-
-def clear_directory(directory, dir_type="directory"):
-    """Clear all files from a directory."""
-    try:
-        count = 0
-        for file in os.listdir(directory):
-            file_path = os.path.join(directory, file)
-            if os.path.isfile(file_path):
-                os.remove(file_path)
-                count += 1
-        if count > 0:
-            logger.info(f"✅ {dir_type.capitalize()} cleared successfully. ({count} files removed)")
-        return count
-    except Exception as e:
-        logger.error(f"❌ Error clearing {dir_type}: {str(e)}")
-        return 0
-
-
-def resize_image(image, max_dim):
-    """Resize image while maintaining aspect ratio if it exceeds max_dim."""
-    width, height = image.size
-
-    if max(width, height) > max_dim:
-        scale = max_dim / max(width, height)
-        new_size = (int(width * scale), int(height * scale))
-        return image.resize(new_size, Image.LANCZOS)
-    
-    return image  # Return original image if no resizing is needed
-
-
-def convert_to_webp(input_path, output_path, compression_mode, max_dim):
-    """Convert image to WebP with resizing & compression settings."""
-    try:
-        logger.info(f"Converting {input_path} to {output_path}")
-        image = Image.open(input_path)
-        image = resize_image(image, max_dim)  # Resize if needed
-
-        # Get compression settings
-        config = WebPConfig.COMPRESSION_MODES.get(compression_mode, WebPConfig.COMPRESSION_MODES[WebPConfig.DEFAULT_MODE])
-        quality = config["quality"]
-        method = config["method"]
-        lossless = config["lossless"]
-        
-        # Handle based on image mode
-        save_params = {"quality": quality, "method": method}
-        
-        if image.mode in ('RGBA', 'LA'):
-            # Handle images with transparency
-            save_params["lossless"] = lossless
-        else:
-            # Convert to RGB for non-transparent images
-            image = image.convert('RGB')
-            
-        image.save(output_path, 'WEBP', **save_params)
-        return True
-    except Exception as e:
-        logger.error(f"Error converting {input_path}: {str(e)}")
-        return False
-
-
-def process_images(input_dir, output_dir, compression_mode, max_dim):
-    """Process all images in input directory and convert to WebP."""
-    conversion_count = 0
-
-    logger.info(f"Looking for files in: {input_dir}")
-    files_in_input = os.listdir(input_dir)
-    logger.info(f"Files found: {len(files_in_input)}")
-
-    for filename in files_in_input:
-        if filename.lower().endswith(WebPConfig.SUPPORTED_FORMATS):
-            input_path = os.path.join(input_dir, filename)
-            output_path = os.path.join(output_dir, f"{os.path.splitext(filename)[0]}.webp")
-            logger.info(f"Processing {filename}...")
-            if convert_to_webp(input_path, output_path, compression_mode, max_dim):
-                conversion_count += 1
-                logger.info(f"✅ Converted: {filename}")
-
-    return conversion_count
-
-
 # Flask routes
 @app.route('/')
 def index():
     # Clear input folder on startup if configured
     global clear_input_folder_on_startup
     if clear_input_folder_on_startup:
-        clear_directory(app.config['UPLOAD_FOLDER'], "input folder")
+        FileHandler.clear_directory(app.config['UPLOAD_FOLDER'], "input folder")
         clear_input_folder_on_startup = False
     
     return render_template('index.html')
@@ -205,7 +229,7 @@ def index():
 def list_output():
     """Return a list of files in the output directory with their sizes."""
     try:
-        output_files = get_files_with_sizes(app.config['OUTPUT_FOLDER'])
+        output_files = FileHandler.get_files_with_sizes(app.config['OUTPUT_FOLDER'])
         return jsonify({"success": True, "files": output_files})
     except Exception as e:
         logger.error(f"Error in list_output: {str(e)}")
@@ -216,7 +240,7 @@ def list_output():
 def list_input():
     """Return a list of files in the input directory with their sizes."""
     try:
-        input_files = get_files_with_sizes(app.config['UPLOAD_FOLDER'])
+        input_files = FileHandler.get_files_with_sizes(app.config['UPLOAD_FOLDER'])
         return jsonify({"success": True, "files": input_files})
     except Exception as e:
         logger.error(f"Error in list_input: {str(e)}")
@@ -227,7 +251,7 @@ def list_input():
 def clear_output():
     """Clear all files from the output directory."""
     try:
-        count = clear_directory(app.config['OUTPUT_FOLDER'], "output folder")
+        count = FileHandler.clear_directory(app.config['OUTPUT_FOLDER'], "output folder")
         return jsonify({"success": True, "message": f"Output folder cleared successfully. {count} files removed."})
     except Exception as e:
         logger.error(f"Error clearing output folder: {str(e)}")
@@ -238,7 +262,7 @@ def clear_output():
 def clear_input():
     """Clear all files from the input directory."""
     try:
-        count = clear_directory(app.config['UPLOAD_FOLDER'], "input folder")
+        count = FileHandler.clear_directory(app.config['UPLOAD_FOLDER'], "input folder")
         return jsonify({"success": True, "message": f"Input folder cleared successfully. {count} files removed."})
     except Exception as e:
         logger.error(f"Error clearing input folder: {str(e)}")
@@ -266,7 +290,7 @@ def upload_files():
                 logger.info(f"Saved file: {filename}")
 
         if file_count > 0:
-            input_files = get_files_with_sizes(app.config['UPLOAD_FOLDER'])
+            input_files = FileHandler.get_files_with_sizes(app.config['UPLOAD_FOLDER'])
             return jsonify({
                 "success": True, 
                 "message": f"{file_count} files uploaded successfully!",
@@ -295,7 +319,7 @@ def convert():
             compression_mode = WebPConfig.DEFAULT_MODE
 
         # Process images
-        conversion_count = process_images(
+        conversion_count = ImageProcessor.process_images(
             app.config['UPLOAD_FOLDER'],
             app.config['OUTPUT_FOLDER'],
             compression_mode,
@@ -303,7 +327,7 @@ def convert():
         )
 
         if conversion_count > 0:
-            output_files = get_files_with_sizes(app.config['OUTPUT_FOLDER'])
+            output_files = FileHandler.get_files_with_sizes(app.config['OUTPUT_FOLDER'])
             return jsonify({
                 "success": True, 
                 "message": f"Conversion complete! {conversion_count} images converted.",
@@ -343,10 +367,13 @@ def rename_output_file():
         old_name = data['oldName']
         new_name = data['newName']
         
-        # Check if old name is empty
-        if not old_name or old_name.strip() == '':
-            return jsonify({"success": False, "message": "Invalid original filename"})
+        # Validate old filename
+        valid, result = FileHandler.validate_file_operation(old_name, app.config['OUTPUT_FOLDER'])
+        if not valid:
+            return jsonify({"success": False, "message": result})
             
+        old_path = result
+        
         # Validate that new filename is secure and ends with .webp
         if not new_name.lower().endswith('.webp'):
             new_name += '.webp'
@@ -357,12 +384,7 @@ def rename_output_file():
         if not new_name or new_name.strip() == '':
             return jsonify({"success": False, "message": "Invalid new filename"})
         
-        old_path = os.path.join(app.config['OUTPUT_FOLDER'], old_name)
         new_path = os.path.join(app.config['OUTPUT_FOLDER'], new_name)
-        
-        # Check if the old file exists
-        if not os.path.exists(old_path):
-            return jsonify({"success": False, "message": f"File {old_name} not found"})
             
         # Check if the new filename already exists
         if os.path.exists(new_path) and old_path != new_path:
@@ -372,7 +394,7 @@ def rename_output_file():
         os.rename(old_path, new_path)
         
         # Return updated file list
-        output_files = get_files_with_sizes(app.config['OUTPUT_FOLDER'])
+        output_files = FileHandler.get_files_with_sizes(app.config['OUTPUT_FOLDER'])
         return jsonify({
             "success": True, 
             "message": f"File renamed successfully from {old_name} to {new_name}",
@@ -394,21 +416,18 @@ def remove_input_file():
         
         file_name = data['fileName']
         
-        # Check if filename is empty
-        if not file_name or file_name.strip() == '':
-            return jsonify({"success": False, "message": "Invalid filename"})
-        
-        file_path = os.path.join(app.config['UPLOAD_FOLDER'], file_name)
-        
-        # Check if the file exists
-        if not os.path.exists(file_path):
-            return jsonify({"success": False, "message": f"File {file_name} not found"})
+        # Validate filename
+        valid, result = FileHandler.validate_file_operation(file_name, app.config['UPLOAD_FOLDER'])
+        if not valid:
+            return jsonify({"success": False, "message": result})
+            
+        file_path = result
         
         # Remove the file
         os.remove(file_path)
         
         # Return updated file list
-        input_files = get_files_with_sizes(app.config['UPLOAD_FOLDER'])
+        input_files = FileHandler.get_files_with_sizes(app.config['UPLOAD_FOLDER'])
         return jsonify({
             "success": True, 
             "message": f"File {file_name} removed successfully",

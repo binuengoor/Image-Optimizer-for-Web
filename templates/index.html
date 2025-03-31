@@ -168,7 +168,9 @@
         </div>
         
         <footer class="pt-3 mt-4 text-muted border-top">
-            Image-Optimizer-for-Web &copy; 2025
+            <a href="https://github.com/binuengoor/Image-Optimizer-for-Web" target="_blank" class="text-decoration-underline text-muted">
+                binuengoor/Image-Optimizer-for-Web
+            </a> &copy; 2025
         </footer>
     </div>
     
@@ -216,7 +218,9 @@
                     clearOutput: '/clear_output',
                     upload: '/upload',
                     convert: '/convert',
-                    output: '/output'
+                    output: '/output',
+                    rename: '/rename_output_file',
+                    remove: '/remove_input_file'
                 },
                 alertDismissTime: 5000 // Time in ms before alerts auto-dismiss
             };
@@ -245,411 +249,452 @@
                 
                 // Form inputs
                 compressionMode: document.getElementById('compression_mode'),
-                maxDimension: document.getElementById('max_dim')
+                maxDimension: document.getElementById('max_dim'),
+                
+                // Modal elements
+                renameModal: document.getElementById('renameModal'),
+                oldFileNameInput: document.getElementById('oldFileName'),
+                newFileNameInput: document.getElementById('newFileName'),
+                renameSubmitBtn: document.getElementById('renameSubmitBtn')
             };
             
-            // Initialize the application
-            initializeApp();
+            // Utility functions
+            const utils = {
+                /**
+                 * Generic API request method
+                 */
+                async apiRequest(url, method, body = null) {
+                    const options = {
+                        method: method,
+                        headers: {}
+                    };
+                    
+                    if (body && !(body instanceof FormData)) {
+                        options.headers['Content-Type'] = 'application/json';
+                        options.body = JSON.stringify(body);
+                    } else if (body) {
+                        options.body = body;
+                    }
+                    
+                    try {
+                        const response = await fetch(url, options);
+                        return await response.json();
+                    } catch (error) {
+                        console.error(`API Error (${url}):`, error);
+                        throw error;
+                    }
+                },
+                
+                /**
+                 * Format file size in human-readable format
+                 */
+                formatFileSize(bytes) {
+                    if (bytes === 0) return '0 Bytes';
+                    const k = 1024;
+                    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+                    const i = Math.floor(Math.log(bytes) / Math.log(k));
+                    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+                },
+                
+                /**
+                 * Show alert message
+                 */
+                showAlert(message, type) {
+                    const alert = document.createElement('div');
+                    alert.className = `alert alert-${type} alert-dismissible fade show`;
+                    alert.innerHTML = `
+                        ${message}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    `;
+                    elements.alertArea.appendChild(alert);
+                    
+                    // Auto-dismiss after set time
+                    setTimeout(() => {
+                        const bsAlert = new bootstrap.Alert(alert);
+                        bsAlert.close();
+                    }, config.alertDismissTime);
+                },
+                
+                /**
+                 * Confirm action with a user
+                 */
+                confirm(message) {
+                    return window.confirm(message);
+                },
+                
+                /**
+                 * Handle API request errors
+                 */
+                handleRequestError(error, defaultMessage) {
+                    console.error('Error:', error);
+                    this.showAlert(`${defaultMessage}: Network error`, 'danger');
+                }
+            };
+            
+            // File operations module
+            const fileOperations = {
+                /**
+                 * Load input files from the server
+                 */
+                loadInputFiles() {
+                    return utils.apiRequest(config.endpoints.listInput, 'GET')
+                        .then(data => {
+                            if (data.success) {
+                                displayManager.displayInputFiles(data.files);
+                                elements.convertButton.disabled = !(data.files && data.files.length > 0);
+                            }
+                            return data;
+                        })
+                        .catch(error => {
+                            utils.handleRequestError(error, 'Error loading input files');
+                        });
+                },
+                
+                /**
+                 * Load output files from the server
+                 */
+                loadOutputFiles() {
+                    return utils.apiRequest(config.endpoints.listOutput, 'GET')
+                        .then(data => {
+                            if (data.success) {
+                                displayManager.displayConvertedFiles(data.files);
+                            }
+                            return data;
+                        })
+                        .catch(error => {
+                            utils.handleRequestError(error, 'Error loading output files');
+                        });
+                },
+                
+                /**
+                 * Upload files to the server
+                 */
+                uploadFiles() {
+                    if (elements.fileInput.files.length === 0) {
+                        return Promise.resolve();
+                    }
+                    
+                    const formData = new FormData();
+                    Array.from(elements.fileInput.files).forEach(file => {
+                        formData.append('files[]', file);
+                    });
+                    
+                    elements.uploadingSpinner.classList.remove('d-none');
+                    
+                    return utils.apiRequest(config.endpoints.upload, 'POST', formData)
+                        .then(data => {
+                            if (data.success) {
+                                utils.showAlert(data.message, 'success');
+                                displayManager.displayInputFiles(data.input_files);
+                                elements.convertButton.disabled = false;
+                            } else {
+                                utils.showAlert(data.message || 'Upload failed', 'danger');
+                            }
+                            return data;
+                        })
+                        .catch(error => {
+                            utils.handleRequestError(error, 'Upload failed');
+                        })
+                        .finally(() => {
+                            elements.uploadingSpinner.classList.add('d-none');
+                        });
+                },
+                
+                /**
+                 * Convert files on the server
+                 */
+                convertFiles() {
+                    const formData = new FormData();
+                    formData.append('compression_mode', elements.compressionMode.value);
+                    formData.append('max_dim', elements.maxDimension.value);
+                    
+                    elements.convertButton.disabled = true;
+                    elements.convertButton.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Converting...';
+                    
+                    return utils.apiRequest(config.endpoints.convert, 'POST', formData)
+                        .then(data => {
+                            if (data.success) {
+                                utils.showAlert(data.message, 'success');
+                                displayManager.displayConvertedFiles(data.output_files);
+                            } else {
+                                utils.showAlert(data.message || 'Conversion failed', 'danger');
+                            }
+                            return data;
+                        })
+                        .catch(error => {
+                            utils.handleRequestError(error, 'Conversion failed');
+                        })
+                        .finally(() => {
+                            elements.convertButton.disabled = false;
+                            elements.convertButton.innerHTML = '<i class="fas fa-sync-alt me-2"></i>Convert';
+                        });
+                },
+                
+                /**
+                 * Clear directory on the server
+                 */
+                clearDirectory(endpoint, successMessage, callback) {
+                    return utils.apiRequest(endpoint, 'POST')
+                        .then(data => {
+                            if (data.success) {
+                                utils.showAlert(data.message || successMessage, 'success');
+                                if (callback) callback();
+                            } else {
+                                utils.showAlert(data.message || 'Failed to clear directory', 'danger');
+                            }
+                            return data;
+                        })
+                        .catch(error => {
+                            utils.handleRequestError(error, 'Failed to clear directory');
+                        });
+                },
+                
+                /**
+                 * Rename file
+                 */
+                renameFile(oldName, newName) {
+                    return utils.apiRequest(config.endpoints.rename, 'POST', { oldName, newName })
+                        .then(data => {
+                            if (data.success) {
+                                utils.showAlert(data.message, 'success');
+                                // Close the modal
+                                const renameModal = bootstrap.Modal.getInstance(elements.renameModal);
+                                renameModal.hide();
+                                // Update the file list with the data returned from the API
+                                if (data.output_files) {
+                                    displayManager.displayConvertedFiles(data.output_files);
+                                }
+                            } else {
+                                utils.showAlert(data.message || 'Rename failed', 'danger');
+                            }
+                            return data;
+                        })
+                        .catch(error => {
+                            utils.handleRequestError(error, 'Rename failed');
+                        });
+                },
+                
+                /**
+                 * Remove input file
+                 */
+                removeInputFile(fileName) {
+                    if (utils.confirm(`Are you sure you want to remove ${fileName}?`)) {
+                        return utils.apiRequest(config.endpoints.remove, 'POST', { fileName })
+                            .then(data => {
+                                if (data.success) {
+                                    utils.showAlert(data.message, 'success');
+                                    if (data.input_files) {
+                                        displayManager.displayInputFiles(data.input_files);
+                                        elements.convertButton.disabled = !(data.input_files && data.input_files.length > 0);
+                                    }
+                                } else {
+                                    utils.showAlert(data.message || 'Failed to remove file', 'danger');
+                                }
+                                return data;
+                            })
+                            .catch(error => {
+                                utils.handleRequestError(error, 'Failed to remove file');
+                            });
+                    }
+                    return Promise.resolve();
+                }
+            };
+            
+            // Display manager module
+            const displayManager = {
+                /**
+                 * Display input files list
+                 */
+                displayInputFiles(files) {
+                    elements.fileList.innerHTML = '';
+                    
+                    if (files && files.length > 0) {
+                        elements.noInputFiles.classList.add('d-none');
+                        
+                        files.forEach(file => {
+                            const item = document.createElement('div');
+                            item.className = 'list-group-item file-item';
+                            
+                            // Check if the file has a thumbnail
+                            const thumbnailHtml = file.thumbnail 
+                                ? `<img src="${file.thumbnail}" class="file-thumbnail" alt="${file.name}">`
+                                : `<i class="fas fa-file-image file-icon"></i>`;
+                            
+                            item.innerHTML = `
+                                ${thumbnailHtml}
+                                <div class="file-info">
+                                    <div class="file-name">${file.name}</div>
+                                    <small class="text-muted">${utils.formatFileSize(file.size)}</small>
+                                    <div class="file-action-buttons">
+                                        <button class="btn btn-sm btn-outline-danger remove-btn" data-file-name="${file.name}">
+                                            Remove
+                                        </button>
+                                    </div>
+                                </div>
+                            `;
+                            elements.fileList.appendChild(item);
+                        });
+                    } else {
+                        elements.noInputFiles.classList.remove('d-none');
+                    }
+                },
+                
+                /**
+                 * Display converted files list
+                 */
+                displayConvertedFiles(files) {
+                    if (files && files.length > 0) {
+                        elements.noResults.classList.add('d-none');
+                        elements.resultFiles.classList.remove('d-none');
+                        elements.resultFiles.innerHTML = '';
+                        
+                        files.forEach(file => {
+                            const item = document.createElement('div');
+                            item.className = 'list-group-item list-group-item-action';
+                            
+                            // Check if the file has a thumbnail
+                            const thumbnailHtml = file.thumbnail 
+                                ? `<img src="${file.thumbnail}" class="output-thumbnail" alt="${file.name}">`
+                                : `<i class="fas fa-file-image file-icon"></i>`;
+                            
+                            item.innerHTML = `
+                                <div class="output-file-item">
+                                    ${thumbnailHtml}
+                                    <div class="file-info">
+                                        <a href="${config.endpoints.output}/${file.name}" target="_blank" class="text-decoration-none">
+                                            <div class="file-name">${file.name}</div>
+                                        </a>
+                                        <small class="text-muted">${utils.formatFileSize(file.size)}</small>
+                                        <div class="file-action-buttons">
+                                            <a href="${config.endpoints.output}/${file.name}?download" class="btn btn-sm btn-outline-primary" download>
+                                                Download
+                                            </a>
+                                            <button class="btn btn-sm btn-outline-secondary rename-btn" data-file-name="${file.name}" data-bs-toggle="modal" data-bs-target="#renameModal">
+                                                Rename
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            `;
+                            elements.resultFiles.appendChild(item);
+                        });
+                    } else {
+                        elements.noResults.classList.remove('d-none');
+                        elements.resultFiles.classList.add('d-none');
+                    }
+                }
+            };
+            
+            // Event Handlers
+            const eventHandlers = {
+                /**
+                 * Setup drag and drop functionality
+                 */
+                setupDragAndDrop() {
+                    // Prevent default browser behavior
+                    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                        elements.dropZone.addEventListener(eventName, this.preventDefaults);
+                    });
+                    
+                    // Highlight drop zone on drag enter/over
+                    ['dragenter', 'dragover'].forEach(eventName => {
+                        elements.dropZone.addEventListener(eventName, () => {
+                            elements.dropZone.classList.add('dragover');
+                        });
+                    });
+                    
+                    // Remove highlight on drag leave/drop
+                    ['dragleave', 'drop'].forEach(eventName => {
+                        elements.dropZone.addEventListener(eventName, () => {
+                            elements.dropZone.classList.remove('dragover');
+                        });
+                    });
+                    
+                    // Handle dropped files
+                    elements.dropZone.addEventListener('drop', (e) => {
+                        const dt = e.dataTransfer;
+                        elements.fileInput.files = dt.files;
+                        fileOperations.uploadFiles();
+                    });
+                },
+                
+                /**
+                 * Setup button handlers
+                 */
+                setupButtonHandlers() {
+                    // Browse button
+                    elements.browseButton.addEventListener('click', () => {
+                        elements.fileInput.click();
+                    });
+                    
+                    // File input change
+                    elements.fileInput.addEventListener('change', () => fileOperations.uploadFiles());
+                    
+                    // Convert button
+                    elements.convertButton.addEventListener('click', () => fileOperations.convertFiles());
+                    
+                    // Clear buttons
+                    elements.clearInputBtn.addEventListener('click', () => {
+                        if (utils.confirm('Are you sure you want to clear all files from the input folder?')) {
+                            fileOperations.clearDirectory(config.endpoints.clearInput, 'Input folder cleared successfully', fileOperations.loadInputFiles);
+                        }
+                    });
+                    
+                    elements.clearOutputBtn.addEventListener('click', () => {
+                        if (utils.confirm('Are you sure you want to clear all files from the output folder?')) {
+                            fileOperations.clearDirectory(config.endpoints.clearOutput, 'Output folder cleared successfully', fileOperations.loadOutputFiles);
+                        }
+                    });
+                    
+                    // Event delegation for rename buttons
+                    elements.resultFiles.addEventListener('click', (e) => {
+                        if (e.target.classList.contains('rename-btn')) {
+                            const fileName = e.target.getAttribute('data-file-name');
+                            elements.oldFileNameInput.value = fileName;
+                            elements.newFileNameInput.value = fileName.replace('.webp', '');
+                        }
+                    });
+                    
+                    // Event delegation for remove buttons in input files
+                    elements.fileList.addEventListener('click', (e) => {
+                        if (e.target.classList.contains('remove-btn')) {
+                            const fileName = e.target.getAttribute('data-file-name');
+                            fileOperations.removeInputFile(fileName);
+                        }
+                    });
+                    
+                    // Rename submit button
+                    elements.renameSubmitBtn.addEventListener('click', () => {
+                        const oldFileName = elements.oldFileNameInput.value;
+                        const newFileName = elements.newFileNameInput.value;
+                        fileOperations.renameFile(oldFileName, newFileName);
+                    });
+                },
+                
+                /**
+                 * Prevent default browser behavior for drag events
+                 */
+                preventDefaults(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+            };
             
             /**
              * Initialize the application
              */
             function initializeApp() {
                 // Load existing files
-                loadInputFiles();
-                loadOutputFiles();
+                fileOperations.loadInputFiles();
+                fileOperations.loadOutputFiles();
                 
                 // Setup event listeners
-                setupDragAndDrop();
-                setupButtonHandlers();
+                eventHandlers.setupDragAndDrop();
+                eventHandlers.setupButtonHandlers();
             }
             
-            /**
-             * Setup drag and drop functionality
-             */
-            function setupDragAndDrop() {
-                // Prevent default browser behavior
-                ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-                    elements.dropZone.addEventListener(eventName, preventDefaults);
-                });
-                
-                // Highlight drop zone on drag enter/over
-                ['dragenter', 'dragover'].forEach(eventName => {
-                    elements.dropZone.addEventListener(eventName, () => {
-                        elements.dropZone.classList.add('dragover');
-                    });
-                });
-                
-                // Remove highlight on drag leave/drop
-                ['dragleave', 'drop'].forEach(eventName => {
-                    elements.dropZone.addEventListener(eventName, () => {
-                        elements.dropZone.classList.remove('dragover');
-                    });
-                });
-                
-                // Handle dropped files
-                elements.dropZone.addEventListener('drop', (e) => {
-                    const dt = e.dataTransfer;
-                    elements.fileInput.files = dt.files;
-                    uploadFiles();
-                });
-            }
-            
-            /**
-             * Setup button handlers
-             */
-            function setupButtonHandlers() {
-                // Browse button
-                elements.browseButton.addEventListener('click', () => {
-                    elements.fileInput.click();
-                });
-                
-                // File input change
-                elements.fileInput.addEventListener('change', uploadFiles);
-                
-                // Convert button
-                elements.convertButton.addEventListener('click', convertFiles);
-                
-                // Clear buttons
-                elements.clearInputBtn.addEventListener('click', () => {
-                    if (confirm('Are you sure you want to clear all files from the input folder?')) {
-                        clearDirectory(config.endpoints.clearInput, 'Input folder cleared successfully', loadInputFiles);
-                    }
-                });
-                
-                elements.clearOutputBtn.addEventListener('click', () => {
-                    if (confirm('Are you sure you want to clear all files from the output folder?')) {
-                        clearDirectory(config.endpoints.clearOutput, 'Output folder cleared successfully', loadOutputFiles);
-                    }
-                });
-            }
-            
-            /**
-             * Prevent default browser behavior for drag events
-             */
-            function preventDefaults(e) {
-                e.preventDefault();
-                e.stopPropagation();
-            }
-            
-            /**
-             * Load input files from the server
-             */
-            function loadInputFiles() {
-                apiRequest(config.endpoints.listInput, 'GET')
-                    .then(data => {
-                        if (data.success) {
-                            displayInputFiles(data.files);
-                            elements.convertButton.disabled = !(data.files && data.files.length > 0);
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Error loading input files:', error);
-                    });
-            }
-            
-            /**
-             * Load output files from the server
-             */
-            function loadOutputFiles() {
-                apiRequest(config.endpoints.listOutput, 'GET')
-                    .then(data => {
-                        if (data.success) {
-                            displayConvertedFiles(data.files);
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Error loading output files:', error);
-                    });
-            }
-            
-            /**
-             * Upload files to the server
-             */
-            function uploadFiles() {
-                if (elements.fileInput.files.length === 0) {
-                    return;
-                }
-                
-                const formData = new FormData();
-                Array.from(elements.fileInput.files).forEach(file => {
-                    formData.append('files[]', file);
-                });
-                
-                elements.uploadingSpinner.classList.remove('d-none');
-                
-                apiRequest(config.endpoints.upload, 'POST', formData)
-                    .then(data => {
-                        if (data.success) {
-                            showAlert(data.message, 'success');
-                            displayInputFiles(data.input_files);
-                            elements.convertButton.disabled = false;
-                        } else {
-                            showAlert(data.message || 'Upload failed', 'danger');
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Error:', error);
-                        showAlert('Upload failed: Network error', 'danger');
-                    })
-                    .finally(() => {
-                        elements.uploadingSpinner.classList.add('d-none');
-                    });
-            }
-            
-            /**
-             * Convert files on the server
-             */
-            function convertFiles() {
-                const formData = new FormData();
-                formData.append('compression_mode', elements.compressionMode.value);
-                formData.append('max_dim', elements.maxDimension.value);
-                
-                elements.convertButton.disabled = true;
-                elements.convertButton.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Converting...';
-                
-                apiRequest(config.endpoints.convert, 'POST', formData)
-                    .then(data => {
-                        if (data.success) {
-                            showAlert(data.message, 'success');
-                            displayConvertedFiles(data.output_files);
-                        } else {
-                            showAlert(data.message || 'Conversion failed', 'danger');
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Error:', error);
-                        showAlert('Conversion failed: Network error', 'danger');
-                    })
-                    .finally(() => {
-                        elements.convertButton.disabled = false;
-                        elements.convertButton.innerHTML = '<i class="fas fa-sync-alt me-2"></i>Convert';
-                    });
-            }
-            
-            /**
-             * Clear directory on the server
-             */
-            function clearDirectory(endpoint, successMessage, callback) {
-                apiRequest(endpoint, 'POST')
-                    .then(data => {
-                        if (data.success) {
-                            showAlert(data.message || successMessage, 'success');
-                            if (callback) callback();
-                        } else {
-                            showAlert(data.message || 'Failed to clear directory', 'danger');
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Error:', error);
-                        showAlert('Failed to clear directory', 'danger');
-                    });
-            }
-            
-            /**
-             * Display input files list
-             */
-            function displayInputFiles(files) {
-                elements.fileList.innerHTML = '';
-                
-                if (files && files.length > 0) {
-                    elements.noInputFiles.classList.add('d-none');
-                    
-                    files.forEach(file => {
-                        const item = document.createElement('div');
-                        item.className = 'list-group-item file-item';
-                        
-                        // Check if the file has a thumbnail
-                        const thumbnailHtml = file.thumbnail 
-                            ? `<img src="${file.thumbnail}" class="file-thumbnail" alt="${file.name}">`
-                            : `<i class="fas fa-file-image file-icon"></i>`;
-                        
-                        item.innerHTML = `
-                            ${thumbnailHtml}
-                            <div class="file-info">
-                                <div class="file-name">${file.name}</div>
-                                <small class="text-muted">${formatFileSize(file.size)}</small>
-                                <div class="file-action-buttons">
-                                    <button class="btn btn-sm btn-outline-danger remove-btn" data-file-name="${file.name}">
-                                        Remove
-                                    </button>
-                                </div>
-                            </div>
-                        `;
-                        elements.fileList.appendChild(item);
-                    });
-                } else {
-                    elements.noInputFiles.classList.remove('d-none');
-                }
-            }
-            
-            /**
-             * Display converted files list
-             */
-            function displayConvertedFiles(files) {
-                if (files && files.length > 0) {
-                    elements.noResults.classList.add('d-none');
-                    elements.resultFiles.classList.remove('d-none');
-                    elements.resultFiles.innerHTML = '';
-                    
-                    files.forEach(file => {
-                        const item = document.createElement('div');
-                        item.className = 'list-group-item list-group-item-action';
-                        
-                        // Check if the file has a thumbnail
-                        const thumbnailHtml = file.thumbnail 
-                            ? `<img src="${file.thumbnail}" class="output-thumbnail" alt="${file.name}">`
-                            : `<i class="fas fa-file-image file-icon"></i>`;
-                        
-                        item.innerHTML = `
-                            <div class="output-file-item">
-                                ${thumbnailHtml}
-                                <div class="file-info">
-                                    <a href="${config.endpoints.output}/${file.name}" target="_blank" class="text-decoration-none">
-                                        <div class="file-name">${file.name}</div>
-                                    </a>
-                                    <small class="text-muted">${formatFileSize(file.size)}</small>
-                                    <div class="file-action-buttons">
-                                        <a href="${config.endpoints.output}/${file.name}?download" class="btn btn-sm btn-outline-primary" download>
-                                            Download
-                                        </a>
-                                        <button class="btn btn-sm btn-outline-secondary rename-btn" data-file-name="${file.name}" data-bs-toggle="modal" data-bs-target="#renameModal">
-                                            Rename
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        `;
-                        elements.resultFiles.appendChild(item);
-                    });
-                } else {
-                    elements.noResults.classList.remove('d-none');
-                    elements.resultFiles.classList.add('d-none');
-                }
-            }
-            
-            /**
-             * Generic API request method
-             */
-            async function apiRequest(url, method, body = null) {
-                const options = {
-                    method: method,
-                    headers: {}
-                };
-                
-                if (body && !(body instanceof FormData)) {
-                    options.headers['Content-Type'] = 'application/json';
-                    options.body = JSON.stringify(body);
-                } else if (body) {
-                    options.body = body;
-                }
-                
-                const response = await fetch(url, options);
-                return await response.json();
-            }
-            
-            /**
-             * Format file size in human-readable format
-             */
-            function formatFileSize(bytes) {
-                if (bytes === 0) return '0 Bytes';
-                const k = 1024;
-                const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-                const i = Math.floor(Math.log(bytes) / Math.log(k));
-                return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-            }
-            
-            /**
-             * Show alert message
-             */
-            function showAlert(message, type) {
-                const alert = document.createElement('div');
-                alert.className = `alert alert-${type} alert-dismissible fade show`;
-                alert.innerHTML = `
-                    ${message}
-                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-                `;
-                elements.alertArea.appendChild(alert);
-                
-                // Auto-dismiss after set time
-                setTimeout(() => {
-                    const bsAlert = new bootstrap.Alert(alert);
-                    bsAlert.close();
-                }, config.alertDismissTime);
-            }
-            
-            /**
-             * Rename file
-             */
-            function renameFile(oldName, newName) {
-                apiRequest('/rename_output_file', 'POST', { oldName, newName })
-                    .then(data => {
-                        if (data.success) {
-                            showAlert(data.message, 'success');
-                            // Close the modal
-                            const renameModal = bootstrap.Modal.getInstance(document.getElementById('renameModal'));
-                            renameModal.hide();
-                            // Update the file list with the data returned from the API
-                            if (data.output_files) {
-                                displayConvertedFiles(data.output_files);
-                            }
-                        } else {
-                            showAlert(data.message || 'Rename failed', 'danger');
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Error:', error);
-                        showAlert('Rename failed: Network error', 'danger');
-                    });
-            }
-            
-            // Event delegation for rename buttons
-            elements.resultFiles.addEventListener('click', (e) => {
-                if (e.target.classList.contains('rename-btn')) {
-                    const fileName = e.target.getAttribute('data-file-name');
-                    document.getElementById('oldFileName').value = fileName;
-                    document.getElementById('newFileName').value = fileName.replace('.webp', '');
-                }
-            });
-            
-            // Event delegation for remove buttons in input files
-            elements.fileList.addEventListener('click', (e) => {
-                if (e.target.classList.contains('remove-btn')) {
-                    const fileName = e.target.getAttribute('data-file-name');
-                    removeInputFile(fileName);
-                }
-            });
-            
-            /**
-             * Remove input file
-             */
-            function removeInputFile(fileName) {
-                if (confirm(`Are you sure you want to remove ${fileName}?`)) {
-                    apiRequest('/remove_input_file', 'POST', { fileName })
-                        .then(data => {
-                            if (data.success) {
-                                showAlert(data.message, 'success');
-                                if (data.input_files) {
-                                    displayInputFiles(data.input_files);
-                                    elements.convertButton.disabled = !(data.input_files && data.input_files.length > 0);
-                                }
-                            } else {
-                                showAlert(data.message || 'Failed to remove file', 'danger');
-                            }
-                        })
-                        .catch(error => {
-                            console.error('Error:', error);
-                            showAlert('Failed to remove file: Network error', 'danger');
-                        });
-                }
-            }
-            
-            // Rename submit button
-            document.getElementById('renameSubmitBtn').addEventListener('click', () => {
-                const oldFileName = document.getElementById('oldFileName').value;
-                const newFileName = document.getElementById('newFileName').value;
-                renameFile(oldFileName, newFileName);
-            });
+            // Start the application
+            initializeApp();
         });
     </script>
 </body>
