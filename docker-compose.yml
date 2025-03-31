@@ -1,5 +1,3 @@
-version: '3'
-
 services:
   webp-optimizer:
     image: ghcr.io/binuengoor/image-optimizer-for-web:latest
