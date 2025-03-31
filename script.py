@@ -4,7 +4,7 @@ WebP Optimizer
 A tool to convert images to WebP format with optimized compression settings
 Now supports max dimension resizing while retaining aspect ratio.
 Author: Your Name
-Version: 1.2
+Version: 1.3
 """
 
 import os
@@ -12,6 +12,8 @@ import logging
 from PIL import Image
 from flask import Flask, request, render_template, send_from_directory, jsonify
 from werkzeug.utils import secure_filename
+import io
+import base64
 
 # Configure logging
 logging.basicConfig(
@@ -36,6 +38,7 @@ class WebPConfig:
     MIN_DIMENSION = 100
     DEFAULT_DIMENSION = 2000
     DEFAULT_MODE = 1
+    THUMBNAIL_SIZE = 100  # Size for thumbnails (square)
     PORT = int(os.environ.get('PORT', 3756))
     DEBUG = os.environ.get('DEBUG', 'True').lower() in ('true', '1', 't')
 
@@ -54,15 +57,53 @@ os.makedirs(app.config['OUTPUT_FOLDER'], exist_ok=True)
 
 
 # Utility functions
+def create_thumbnail_b64(file_path):
+    """Create a base64 encoded thumbnail for an image"""
+    try:
+        with Image.open(file_path) as img:
+            # Create a thumbnail, preserving aspect ratio
+            img.thumbnail((WebPConfig.THUMBNAIL_SIZE, WebPConfig.THUMBNAIL_SIZE))
+            
+            # Convert to RGB if necessary (for transparent images)
+            if img.mode in ('RGBA', 'LA'):
+                background = Image.new('RGB', img.size, (255, 255, 255))
+                background.paste(img, mask=img.split()[3])  # 3 is the alpha channel
+                img = background
+            
+            # Save thumbnail to memory buffer
+            buffer = io.BytesIO()
+            img.save(buffer, format='JPEG', quality=70)
+            buffer.seek(0)
+            
+            # Convert to base64
+            img_b64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+            return f"data:image/jpeg;base64,{img_b64}"
+    except Exception as e:
+        logger.error(f"Error creating thumbnail for {file_path}: {str(e)}")
+        return None
+
+
 def get_files_with_sizes(directory):
-    """Get all files in a directory with their sizes."""
+    """Get all files in a directory with their sizes and thumbnails."""
     files = []
     try:
         for file in os.listdir(directory):
+            # Skip .gitkeep files
+            if file == '.gitkeep':
+                continue
+                
             file_path = os.path.join(directory, file)
             if os.path.isfile(file_path):
                 file_size = os.path.getsize(file_path)
-                files.append({"name": file, "size": file_size})
+                file_data = {"name": file, "size": file_size}
+                
+                # Generate thumbnail for supported image formats
+                if file.lower().endswith(WebPConfig.SUPPORTED_FORMATS):
+                    thumbnail = create_thumbnail_b64(file_path)
+                    if thumbnail:
+                        file_data["thumbnail"] = thumbnail
+                        
+                files.append(file_data)
         return files
     except Exception as e:
         logger.error(f"Error listing files in {directory}: {str(e)}")
@@ -289,6 +330,94 @@ def download_file(filename):
     except Exception as e:
         logger.error(f"Error serving file {filename}: {str(e)}")
         return jsonify({"success": False, "message": f"File not found: {filename}"})
+
+
+@app.route('/rename_output_file', methods=['POST'])
+def rename_output_file():
+    """Rename a file in the output directory."""
+    try:
+        data = request.get_json()
+        if not data or 'oldName' not in data or 'newName' not in data:
+            return jsonify({"success": False, "message": "Both old and new filenames are required"})
+        
+        old_name = data['oldName']
+        new_name = data['newName']
+        
+        # Check if old name is empty
+        if not old_name or old_name.strip() == '':
+            return jsonify({"success": False, "message": "Invalid original filename"})
+            
+        # Validate that new filename is secure and ends with .webp
+        if not new_name.lower().endswith('.webp'):
+            new_name += '.webp'
+        
+        new_name = secure_filename(new_name)
+        
+        # Check if new filename is empty after securing
+        if not new_name or new_name.strip() == '':
+            return jsonify({"success": False, "message": "Invalid new filename"})
+        
+        old_path = os.path.join(app.config['OUTPUT_FOLDER'], old_name)
+        new_path = os.path.join(app.config['OUTPUT_FOLDER'], new_name)
+        
+        # Check if the old file exists
+        if not os.path.exists(old_path):
+            return jsonify({"success": False, "message": f"File {old_name} not found"})
+            
+        # Check if the new filename already exists
+        if os.path.exists(new_path) and old_path != new_path:
+            return jsonify({"success": False, "message": f"File {new_name} already exists"})
+        
+        # Rename the file
+        os.rename(old_path, new_path)
+        
+        # Return updated file list
+        output_files = get_files_with_sizes(app.config['OUTPUT_FOLDER'])
+        return jsonify({
+            "success": True, 
+            "message": f"File renamed successfully from {old_name} to {new_name}",
+            "output_files": output_files
+        })
+        
+    except Exception as e:
+        logger.error(f"Error renaming file: {str(e)}")
+        return jsonify({"success": False, "message": f"Error renaming file: {str(e)}"})
+
+
+@app.route('/remove_input_file', methods=['POST'])
+def remove_input_file():
+    """Remove a file from the input directory."""
+    try:
+        data = request.get_json()
+        if not data or 'fileName' not in data:
+            return jsonify({"success": False, "message": "Filename is required"})
+        
+        file_name = data['fileName']
+        
+        # Check if filename is empty
+        if not file_name or file_name.strip() == '':
+            return jsonify({"success": False, "message": "Invalid filename"})
+        
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], file_name)
+        
+        # Check if the file exists
+        if not os.path.exists(file_path):
+            return jsonify({"success": False, "message": f"File {file_name} not found"})
+        
+        # Remove the file
+        os.remove(file_path)
+        
+        # Return updated file list
+        input_files = get_files_with_sizes(app.config['UPLOAD_FOLDER'])
+        return jsonify({
+            "success": True, 
+            "message": f"File {file_name} removed successfully",
+            "input_files": input_files
+        })
+        
+    except Exception as e:
+        logger.error(f"Error removing file: {str(e)}")
+        return jsonify({"success": False, "message": f"Error removing file: {str(e)}"})
 
 
 if __name__ == "__main__":
