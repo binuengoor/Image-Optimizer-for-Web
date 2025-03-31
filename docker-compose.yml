@@ -1,9 +1,9 @@
 services:
-  webp-optimizer:
+  image-optimizer-for-web:
     image: ghcr.io/binuengoor/image-optimizer-for-web:latest
     # Alternatively, build from local Dockerfile
     # build: .
-    container_name: webp-optimizer
+    container_name: image-optimizer-for-web
     ports:
       - "3756:3756"
     volumes:
